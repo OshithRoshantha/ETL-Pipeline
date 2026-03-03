@@ -1,0 +1,24 @@
+# Environment
+.env
+venv/
+env/
+*.pyc
+__pycache__/
+
+# Data files
+*.db
+
+# Logs
+logs/*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# AWS
+.aws/
