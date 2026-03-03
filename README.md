@@ -81,31 +81,42 @@ Check out sql/queries.sql for sample queries. Includes stuff like:
 
 Run them with: `psql -d your_db -f sql/queries.sql`
 
-## Scaling thoughts
+## Scaling to Production (1M+ Records)
 
-For handling way more data (1M+ records):
+### Architecture Evolution
 
-Database side - would add partitioning by date (monthly partitions probably). Also materialized views for common aggregations. And pgBouncer for connection pooling.
+**Current**: Pandas → PostgreSQL (works for 12k-100k records)  
+**Scaled**: Kafka → Spark → S3 Data Lake → PostgreSQL (aggregates only)
 
-ETL side - process in chunks instead of loading everything at once. Could parallelize with multiprocessing for independent transforms. Incremental loads where we only process new data.
+### 1. Distributed Processing with Apache Spark
 
-For scheduling, simple cron job works fine for now:
-```bash
-0 2 * * * python /path/to/run_pipeline.py >> /logs/cron.log 2>&1
-```
+Replace pandas with PySpark to enable horizontal scaling across multiple nodes. Instead of processing data on a single machine, Spark distributes the work across a cluster of 10-100 worker nodes. Each node processes a chunk of data in parallel, reducing processing time from hours to minutes for 1M+ records.
 
-Could move to Airflow later if we need retry logic, monitoring, complex dependencies between tasks etc.
+### 2. Orchestration with Apache Airflow
 
-Would also add retry logic with exponential backoff, circuit breaker pattern if DB is down, data quality checks (assert record counts, check nulls, validate ranges).
+Move from simple cron jobs to Airflow for enterprise-grade workflow management. Airflow provides a visual DAG (Directed Acyclic Graph) interface showing task dependencies, execution status, and performance metrics.
 
-For really massive scale might switch to full data lake setup - keep everything in S3 as parquet files, use Athena to query directly, only load aggregated results to postgres.
+### 3. Real-Time Ingestion with Apache Kafka
 
-## Performance
+For streaming data from live booking systems, Kafka acts as a distributed message queue. Producer applications (booking APIs) publish events to Kafka topics as bookings happen. Consumer applications (Spark Streaming) read from these topics and process data in micro-batches 
 
-Running on about 12k records:
-- ETL takes 5-8 seconds
-- DB load is 3-4 seconds  
-- S3 upload depends on network but usually 2-3 seconds
+### 4. Partitioning Strategy
+
+**Database Partitioning**: Split large tables into smaller physical partitions. Use range partitioning by date (monthly partitions: bookings_2026_01, bookings_2026_02) so queries filtering by date only scan relevant partitions. Use list partitioning by country for geo-specific queries. 
+
+### 5. Indexing Strategy Evolution
+
+Beyond basic single-column indexes, implement:
+
+**Composite Indexes**: Multi-column indexes matching common query patterns for queries filtering on multiple fields.
+
+**Materialized Views**: Pre-computed aggregations that refresh periodically. 
+
+**Covering Indexes**: Include frequently accessed columns in the index itself to avoid looking up the main table.
+
+### 6. Failure Handling & Resilience
+
+**Monitoring & Alerting**: Track Airflow violations, Kafka consumer lag, Spark job failures, data quality metrics, and resource utilization. 
 
 ## Files
 
@@ -113,7 +124,6 @@ Running on about 12k records:
 - scripts/etl_pipeline.py - core ETL logic
 - scripts/s3_integration.py - S3 upload/download
 - scripts/setup_database.py - initializes DB schema
-- scripts/performance_demo.py - shows index performance
 - data_quality_analysis.ipynb - jupyter notebook analyzing data issues
 - sql/schema.sql - table definition with indexes
 - sql/queries.sql - analytical queries
